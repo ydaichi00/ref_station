@@ -1,9 +1,10 @@
+```html
 <!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>エリア判定ツール（PRO / RES）</title>
+  <title>最近傍点検索（PRO / RES）</title>
   <style>
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; max-width:860px; margin:24px auto; padding:0 16px;}
     h1{font-size:22px; margin:0 0 10px;}
@@ -11,9 +12,8 @@
     label{display:block; margin:10px 0 6px; font-weight:700;}
     input{width:100%; padding:10px 12px; font-size:16px; border:1px solid #ccc; border-radius:10px;}
     .rowline{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px;}
-    button{padding:10px 14px; font-size:16px; border-radius:10px; cursor:pointer;}
-    .modebtn{border:1px solid #ccc; background:#fff;}
-    .modebtn.active{border-color:#111; font-weight:800;}
+    button{padding:10px 14px; font-size:16px; border-radius:10px; cursor:pointer; border:1px solid #ccc; background:#fff;}
+    button:active{transform:translateY(1px);}
     .card{margin-top:16px; padding:12px; border:1px solid #ddd; border-radius:12px;}
     .row{margin:6px 0;}
     .err{color:#b00020; font-weight:800;}
@@ -27,22 +27,21 @@
 </head>
 
 <body>
-  <h1>エリア判定ツール（PRO / RES）</h1>
+  <h1>最近傍点検索（PRO / RES）</h1>
   <p class="help">
     入力形式：<code>35.88446158066726, 139.4528218383903</code>（緯度, 経度）<br/>
-    出力：最も近い基準局所在地（都道府県名）＋距離（km）＋判定
+    出力：最近接点（都道府県名）＋距離（km）＋判定
   </p>
 
   <label for="coord">緯度, 経度</label>
   <input id="coord" placeholder='例: 35.88446158066726, 139.4528218383903' />
 
   <div class="rowline">
-    <label style="margin:0; font-weight:700;">検索モード</label>
-
-    <button id="modePRO" class="modebtn" type="button">PRO</button>
-    <button id="modeRES" class="modebtn" type="button">RES</button>
-    <button id="modeBOTH" class="modebtn" type="button">PRO/RES 両方</button>
-
+    <label style="margin:0; font-weight:700;">検索</label>
+    <button id="btnPRO" type="button">PROで検索</button>
+    <button id="btnRES" type="button">RESで検索</button>
+    <button id="btnBOTH" type="button">両方で検索</button>
+    <span class="muted">（ボタン押下で検索 / Enterは両方）</span>
   </div>
 
   <details>
@@ -134,7 +133,6 @@
     }
 
     function displayName(point) {
-      // PRO/RES ともに pref が入っていれば都道府県名になる
       return point.name ?? point.pref ?? point.id ?? "(no name)";
     }
 
@@ -150,50 +148,33 @@
     const out = document.getElementById("out");
     const input = document.getElementById("coord");
 
-    const btnModePRO  = document.getElementById("modePRO");
-    const btnModeRES  = document.getElementById("modeRES");
-    const btnModeBOTH = document.getElementById("modeBOTH");
-
-    let currentMode = "BOTH"; // 初期値（表示上の初期選択）
-
-    function setMode(m, autoRun = true) {
-      currentMode = m;
-
-      btnModePRO.classList.toggle("active", m === "PRO");
-      btnModeRES.classList.toggle("active", m === "RES");
-      btnModeBOTH.classList.toggle("active", m === "BOTH");
-
-      if (autoRun) run();
+    function setBusy(isBusy) {
+      document.getElementById("btnPRO").disabled = isBusy;
+      document.getElementById("btnRES").disabled = isBusy;
+      document.getElementById("btnBOTH").disabled = isBusy;
     }
 
-    btnModePRO.addEventListener("click", () => setMode("PRO", true));
-    btnModeRES.addEventListener("click", () => setMode("RES", true));
-    btnModeBOTH.addEventListener("click", () => setMode("BOTH", true));
-
-    // 初期は選択状態だけ付けて、勝手に検索はしない
-    setMode("BOTH", false);
-
-    async function run() {
+    async function run(mode) {
       out.style.display = "block";
       out.innerHTML = "計算中…";
+      setBusy(true);
 
       const parsed = parseLatLngLine(input.value);
       if (parsed.error) {
         out.innerHTML = `<div class="err">${parsed.error}</div>`;
+        setBusy(false);
         return;
       }
 
-      const m = currentMode;
-
       try {
-        if (m === "PRO") {
+        if (mode === "PRO") {
           const r = await findNearest("PRO", parsed.lat, parsed.lng);
           const km = r.distance_m / 1000;
           out.innerHTML = renderBlock("PRO", displayName(r.point), km, CONFIG.PRO.judge(km));
           return;
         }
 
-        if (m === "RES") {
+        if (mode === "RES") {
           const r = await findNearest("RES", parsed.lat, parsed.lng);
           const km = r.distance_m / 1000;
           out.innerHTML = renderBlock("RES", displayName(r.point), km, CONFIG.RES.judge(km));
@@ -216,11 +197,21 @@
         `;
       } catch (e) {
         out.innerHTML = `<div class="err">${e.message}</div>`;
+      } finally {
+        setBusy(false);
       }
     }
 
-    // Enterでも検索
-    input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") run(); });
+    // ボタン押下で、そのモードで検索開始
+    document.getElementById("btnPRO").addEventListener("click", () => run("PRO"));
+    document.getElementById("btnRES").addEventListener("click", () => run("RES"));
+    document.getElementById("btnBOTH").addEventListener("click", () => run("BOTH"));
+
+    // Enterは両方で検索
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") run("BOTH");
+    });
   </script>
 </body>
 </html>
+```
