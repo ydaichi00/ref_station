@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>最近傍点検索（PRO / RES）</title>
+  <title> エリア判定ツール（PRO / RES）</title>
   <style>
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; max-width:860px; margin:24px auto; padding:0 16px;}
     h1{font-size:22px; margin:0 0 10px;}
@@ -26,10 +26,10 @@
   </style>
 </head>
 <body>
-  <h1>最近傍点検索（PRO / RES）</h1>
+  <h1>基準局判定ツール（PRO / RES）</h1>
   <p class="help">
     入力形式：<code>35.88446158066726, 139.4528218383903</code>（緯度, 経度）<br/>
-    出力：最近接点（都道府県名 or 点ID）＋距離（km）＋判定
+    出力：一番近い基準局（都道府県名 or 点ID）＋距離（km）＋判定
   </p>
 
   <label for="coord">緯度, 経度</label>
@@ -142,7 +142,7 @@ const CONFIG = {
 
 function renderBlock(which, name, km, verdictText) {
   return `
-    <div class="row"><b>${which} 最近接点:</b> ${name}</div>
+    <div class="row"><b>${which} 一番近い基準局:</b> ${name}</div>
     <div class="row"><b>${which} 距離:</b> ${km.toFixed(3)} km</div>
     <div class="row"><b>${which} 判定:</b> ${verdictText}</div>
   `;
