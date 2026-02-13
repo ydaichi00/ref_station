@@ -3,53 +3,71 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>最近傍点検索</title>
+  <title>最近傍点検索（lat,lng）</title>
   <style>
-    body{font-family:system-ui, sans-serif; max-width:720px; margin:24px auto; padding:0 16px;}
-    label{display:block; margin:12px 0 4px;}
-    input{width:100%; padding:10px; font-size:16px;}
-    button{margin-top:12px; padding:10px 14px; font-size:16px; cursor:pointer;}
-    .card{margin-top:16px; padding:12px; border:1px solid #ddd; border-radius:10px;}
-    .err{color:#b00020;}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; max-width:760px; margin:24px auto; padding:0 16px;}
+    h1{font-size:22px; margin:0 0 12px;}
+    .help{color:#555; font-size:14px; margin:0 0 12px; line-height:1.5;}
+    label{display:block; margin:12px 0 6px; font-weight:600;}
+    input{width:100%; padding:10px 12px; font-size:16px; border:1px solid #ccc; border-radius:10px;}
+    button{margin-top:12px; padding:10px 14px; font-size:16px; border:0; border-radius:10px; cursor:pointer;}
+    .card{margin-top:16px; padding:12px; border:1px solid #ddd; border-radius:12px;}
+    .row{margin:6px 0;}
+    .err{color:#b00020; font-weight:600;}
     code{background:#f6f8fa; padding:2px 6px; border-radius:6px;}
   </style>
 </head>
 <body>
-  <h1>最近傍点検索（緯度経度）</h1>
+  <h1>最近傍点検索（緯度, 経度）</h1>
+  <p class="help">
+    入力形式：<code>35.88446158066726, 139.4528218383903</code><br/>
+    ※ 緯度は -90〜90、経度は -180〜180
+  </p>
 
-  <label>緯度 (lat)</label>
-  <input id="lat" placeholder="例: 35.681236" inputmode="decimal" />
-
-  <label>経度 (lng)</label>
-  <input id="lng" placeholder="例: 139.767125" inputmode="decimal" />
+  <label for="coord">緯度, 経度</label>
+  <input id="coord" placeholder='例: 35.88446158066726, 139.4528218383903' />
 
   <button id="btn">検索</button>
 
   <div id="out" class="card" style="display:none;"></div>
 
   <script>
-    const R = 6371000; // meters
+    // Earth radius in meters (mean radius)
+    const R = 6371000;
+
     const toRad = (deg) => deg * Math.PI / 180;
 
     function haversineMeters(lat1, lng1, lat2, lng2) {
       const φ1 = toRad(lat1), φ2 = toRad(lat2);
       const dφ = toRad(lat2 - lat1);
       const dλ = toRad(lng2 - lng1);
-      const a = Math.sin(dφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(dλ/2)**2;
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      const a = Math.sin(dφ/2)**2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(dλ/2)**2;
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       return R * c;
     }
 
-    function parseNum(v) {
-      const n = Number(String(v).trim());
-      return Number.isFinite(n) ? n : null;
-    }
+    // Accept: "lat, lng" (commas required)
+    function parseLatLngLine(s) {
+      if (!s) return { lat: null, lng: null, error: "入力が空です" };
 
-    function validateLatLng(lat, lng) {
-      if (lat === null || lng === null) return "緯度経度は数値で入力してね";
-      if (lat < -90 || lat > 90) return "緯度は -90〜90";
-      if (lng < -180 || lng > 180) return "経度は -180〜180";
-      return null;
+      // Remove extra spaces (including full-width) around comma
+      const parts = String(s).trim().split(",");
+      if (parts.length !== 2) {
+        return { lat: null, lng: null, error: "形式は「緯度, 経度」です（カンマ区切り）" };
+      }
+      const lat = Number(parts[0].trim());
+      const lng = Number(parts[1].trim());
+
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return { lat: null, lng: null, error: "緯度経度は数値で入力してください" };
+      }
+      if (lat < -90 || lat > 90) {
+        return { lat: null, lng: null, error: "緯度は -90〜90 です" };
+      }
+      if (lng < -180 || lng > 180) {
+        return { lat: null, lng: null, error: "経度は -180〜180 です" };
+      }
+      return { lat, lng, error: null };
     }
 
     async function loadPoints() {
@@ -66,42 +84,61 @@
       let best = null;
       for (const p of points) {
         if (typeof p.lat !== "number" || typeof p.lng !== "number") continue;
+
         const d = haversineMeters(lat, lng, p.lat, p.lng);
-        if (!best || d < best.distance) best = { point: p, distance: d };
+        if (!best || d < best.distance_m) {
+          best = { point: p, distance_m: d };
+        }
       }
       if (!best) throw new Error("有効な候補点がありません");
       return best;
     }
 
+    function formatKm(meters) {
+      const km = meters / 1000;
+      // km表示：小さい距離でも見やすいように 3桁固定
+      return km.toFixed(3);
+    }
+
     const out = document.getElementById("out");
     const btn = document.getElementById("btn");
+    const input = document.getElementById("coord");
 
-    btn.addEventListener("click", async () => {
+    async function run() {
       out.style.display = "block";
       out.innerHTML = "計算中…";
 
-      const lat = parseNum(document.getElementById("lat").value);
-      const lng = parseNum(document.getElementById("lng").value);
-
-      const err = validateLatLng(lat, lng);
-      if (err) {
-        out.innerHTML = `<div class="err">${err}</div>`;
+      const { lat, lng, error } = parseLatLngLine(input.value);
+      if (error) {
+        out.innerHTML = `<div class="err">${error}</div>`;
         return;
       }
 
       try {
-        const { point, distance } = await findNearest(lat, lng);
-        const km = (distance / 1000);
+        const { point, distance_m } = await findNearest(lat, lng);
+        const name = point.name ?? point.pref ?? point.id ?? "(no name)";
 
         out.innerHTML = `
-          <div><b>最近傍点:</b> ${point.name ?? point.id ?? "(no name)"}</div>
-          <div>座標: <code>${point.lat}</code>, <code>${point.lng}</code></div>
-          <div>距離: <b>${distance.toFixed(1)} m</b>（${km.toFixed(3)} km）</div>
+          <div class="row"><b>最近接点:</b> ${name}</div>
+          <div class="row"><b>距離:</b> ${formatKm(distance_m)} km</div>
+          <div class="row" style="color:#555; font-size:14px;">
+            参照点座標: <code>${point.lat}</code>, <code>${point.lng}</code>
+          </div>
         `;
       } catch (e) {
         out.innerHTML = `<div class="err">${e.message}</div>`;
       }
+    }
+
+    btn.addEventListener("click", run);
+
+    // Enterキーでも検索
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") run();
     });
+
+    // 初期値（必要なら消してOK）
+    // input.value = "35.88446158066726, 139.4528218383903";
   </script>
 </body>
 </html>
