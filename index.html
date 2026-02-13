@@ -15,6 +15,7 @@
     .row{margin:6px 0;}
     .err{color:#b00020; font-weight:600;}
     code{background:#f6f8fa; padding:2px 6px; border-radius:6px;}
+    .badge{display:inline-block; padding:2px 8px; border:1px solid #ddd; border-radius:999px; font-size:14px; margin-left:6px;}
   </style>
 </head>
 <body>
@@ -46,11 +47,10 @@
       return R * c;
     }
 
-    // Accept: "lat, lng" (commas required)
+    // Accept: "lat, lng"
     function parseLatLngLine(s) {
       if (!s) return { lat: null, lng: null, error: "入力が空です" };
 
-      // Remove extra spaces (including full-width) around comma
       const parts = String(s).trim().split(",");
       if (parts.length !== 2) {
         return { lat: null, lng: null, error: "形式は「緯度, 経度」です（カンマ区切り）" };
@@ -96,8 +96,19 @@
 
     function formatKm(meters) {
       const km = meters / 1000;
-      // km表示：小さい距離でも見やすいように 3桁固定
       return km.toFixed(3);
+    }
+
+    function judge(km) {
+      // 仕様どおり：境界を明確化
+      // <30: ◎
+      // 30〜40（含む）: 〇
+      // >40〜50（含む）: 要現地調査
+      // >50: 非推奨
+      if (km < 30) return "◎";
+      if (km <= 40) return "〇";
+      if (km <= 50) return "要現地調査";
+      return "非推奨";
     }
 
     const out = document.getElementById("out");
@@ -118,12 +129,12 @@
         const { point, distance_m } = await findNearest(lat, lng);
         const name = point.name ?? point.pref ?? point.id ?? "(no name)";
 
+        const km = distance_m / 1000;
+        const verdict = judge(km);
+
         out.innerHTML = `
           <div class="row"><b>最近接点:</b> ${name}</div>
-          <div class="row"><b>距離:</b> ${formatKm(distance_m)} km</div>
-          <div class="row" style="color:#555; font-size:14px;">
-            参照点座標: <code>${point.lat}</code>, <code>${point.lng}</code>
-          </div>
+          <div class="row"><b>距離:</b> ${formatKm(distance_m)} km <span class="badge">${verdict}</span></div>
         `;
       } catch (e) {
         out.innerHTML = `<div class="err">${e.message}</div>`;
@@ -131,14 +142,9 @@
     }
 
     btn.addEventListener("click", run);
-
-    // Enterキーでも検索
     input.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") run();
     });
-
-    // 初期値（必要なら消してOK）
-    // input.value = "35.88446158066726, 139.4528218383903";
   </script>
 </body>
 </html>
