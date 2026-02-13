@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title> エリア判定ツール（PRO / RES）</title>
+  <title>最近傍点検索（PRO / RES）</title>
   <style>
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; max-width:860px; margin:24px auto; padding:0 16px;}
     h1{font-size:22px; margin:0 0 10px;}
@@ -11,13 +11,13 @@
     label{display:block; margin:10px 0 6px; font-weight:700;}
     input{width:100%; padding:10px 12px; font-size:16px; border:1px solid #ccc; border-radius:10px;}
     .rowline{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px;}
-    select{padding:10px 12px; font-size:16px; border:1px solid #ccc; border-radius:10px;}
-    button{padding:10px 14px; font-size:16px; border:0; border-radius:10px; cursor:pointer;}
+    button{padding:10px 14px; font-size:16px; border-radius:10px; cursor:pointer;}
+    .modebtn{border:1px solid #ccc; background:#fff;}
+    .modebtn.active{border-color:#111; font-weight:800;}
     .card{margin-top:16px; padding:12px; border:1px solid #ddd; border-radius:12px;}
     .row{margin:6px 0;}
     .err{color:#b00020; font-weight:800;}
     code{background:#f6f8fa; padding:2px 6px; border-radius:6px;}
-    .badge{display:inline-block; padding:2px 8px; border:1px solid #ddd; border-radius:999px; font-size:14px; margin-left:6px;}
     .hr{height:1px; background:#eee; margin:10px 0;}
     details{border:1px dashed #ccc; border-radius:12px; padding:10px 12px; margin-top:14px;}
     summary{cursor:pointer; font-weight:700;}
@@ -25,11 +25,12 @@
     .muted{color:#666; font-size:13px;}
   </style>
 </head>
+
 <body>
-  <h1>基準局判定ツール（PRO / RES）</h1>
+  <h1>最近傍点検索（PRO / RES）</h1>
   <p class="help">
     入力形式：<code>35.88446158066726, 139.4528218383903</code>（緯度, 経度）<br/>
-    出力：一番近い基準局（都道府県名 or 点ID）＋距離（km）＋判定
+    出力：最近接点（都道府県名）＋距離（km）＋判定
   </p>
 
   <label for="coord">緯度, 経度</label>
@@ -37,46 +38,48 @@
 
   <div class="rowline">
     <label style="margin:0; font-weight:700;">検索モード</label>
-    <select id="mode">
-      <option value="PRO">PRO</option>
-      <option value="RES">RES</option>
-      <option value="BOTH" selected>両方</option>
-    </select>
-    <button id="btn">検索</button>
-    <span class="muted">Enterでも検索</span>
+
+    <button id="modePRO" class="modebtn" type="button">PRO</button>
+    <button id="modeRES" class="modebtn" type="button">RES</button>
+    <button id="modeBOTH" class="modebtn" type="button">両方</button>
+
+    <span class="muted">（ボタン押下で即検索 / Enterでも検索）</span>
   </div>
-  
+
+  <details>
+    <summary>判定基準（注意書き）</summary>
+    <ul>
+      <li><b>PRO</b>：◎（30km未満）／〇（30km以上、40km未満）／要現地調査（40km以上、50km未満）／非推奨（50km以上）</li>
+      <li><b>RES</b>：◎（40km未満）／〇（40km以上、50km未満）／要現地調査（50km以上、60km未満）／非推奨（60km以上）</li>
+    </ul>
+  </details>
+
   <div id="out" class="card" style="display:none;"></div>
 
   <script>
     // =========================
     // PRO/RES 設定
     // =========================
-
-const CONFIG = {
-  PRO: {
-    pointsFile: "./PROpoints.json",
-    // <30 / 30-40 / 40-50 / >=50 （すべて「未満/以上」ルール）
-    judge: (km) => {
-      if (km < 30) return "◎（30km未満）";
-      if (km < 40) return "〇（30km以上、40km未満）";
-      if (km < 50) return "要現地調査（40km以上、50km未満）";
-      return "非推奨（50km以上）";
-    }
-  },
-  RES: {
-    pointsFile: "./RESpoints.json",
-    // <40 / 40-50 / 50-60 / >=60
-    judge: (km) => {
-      if (km < 40) return "◎（40km未満）";
-      if (km < 50) return "〇（40km以上、50km未満）";
-      if (km < 60) return "要現地調査（50km以上、60km未満）";
-      return "非推奨（60km以上）";
-    }
-  }
-};
-
-    
+    const CONFIG = {
+      PRO: {
+        pointsFile: "./PROpoints.json",
+        judge: (km) => {
+          if (km < 30) return "◎（30km未満）";
+          if (km < 40) return "〇（30km以上、40km未満）";
+          if (km < 50) return "要現地調査（40km以上、50km未満）";
+          return "非推奨（50km以上）";
+        }
+      },
+      RES: {
+        pointsFile: "./RESpoints.json",
+        judge: (km) => {
+          if (km < 40) return "◎（40km未満）";
+          if (km < 50) return "〇（40km以上、50km未満）";
+          if (km < 60) return "要現地調査（50km以上、60km未満）";
+          return "非推奨（60km以上）";
+        }
+      }
+    };
 
     // ===== Core geo =====
     const R = 6371000; // meters
@@ -102,10 +105,6 @@ const CONFIG = {
       if (lat < -90 || lat > 90) return { lat: null, lng: null, error: "緯度は -90〜90 です" };
       if (lng < -180 || lng > 180) return { lat: null, lng: null, error: "経度は -180〜180 です" };
       return { lat, lng, error: null };
-    }
-
-    function formatKm(meters) {
-      return (meters / 1000).toFixed(3);
     }
 
     // ===== Data loading (cached) =====
@@ -136,36 +135,56 @@ const CONFIG = {
     }
 
     function displayName(point) {
-      // PROはprefがある前提、RESはidのみでも動く
+      // PRO/RES ともに pref が入っていれば都道府県名になる
       return point.name ?? point.pref ?? point.id ?? "(no name)";
     }
 
-function renderBlock(which, name, km, verdictText) {
-  return `
-    <div class="row"><b>${which} 一番近い基準局:</b> ${name}</div>
-    <div class="row"><b>${which} 距離:</b> ${km.toFixed(3)} km</div>
-    <div class="row"><b>${which} 判定:</b> ${verdictText}</div>
-  `;
-}
-
-
+    function renderBlock(which, name, km, verdictText) {
+      return `
+        <div class="row"><b>${which} 最近接点:</b> ${name}</div>
+        <div class="row"><b>${which} 距離:</b> ${km.toFixed(3)} km</div>
+        <div class="row"><b>${which} 判定:</b> ${verdictText}</div>
+      `;
+    }
 
     // ===== UI =====
     const out = document.getElementById("out");
     const input = document.getElementById("coord");
-    const mode = document.getElementById("mode");
+
+    const btnModePRO  = document.getElementById("modePRO");
+    const btnModeRES  = document.getElementById("modeRES");
+    const btnModeBOTH = document.getElementById("modeBOTH");
+
+    let currentMode = "BOTH"; // 初期値（表示上の初期選択）
+
+    function setMode(m, autoRun = true) {
+      currentMode = m;
+
+      btnModePRO.classList.toggle("active", m === "PRO");
+      btnModeRES.classList.toggle("active", m === "RES");
+      btnModeBOTH.classList.toggle("active", m === "BOTH");
+
+      if (autoRun) run();
+    }
+
+    btnModePRO.addEventListener("click", () => setMode("PRO", true));
+    btnModeRES.addEventListener("click", () => setMode("RES", true));
+    btnModeBOTH.addEventListener("click", () => setMode("BOTH", true));
+
+    // 初期は選択状態だけ付けて、勝手に検索はしない
+    setMode("BOTH", false);
 
     async function run() {
       out.style.display = "block";
       out.innerHTML = "計算中…";
 
-const parsed = parseLatLngLine(input.value);
-if (parsed.error) {
-  out.innerHTML = `<div class="err">${parsed.error}</div>`;
-  return;
-}
+      const parsed = parseLatLngLine(input.value);
+      if (parsed.error) {
+        out.innerHTML = `<div class="err">${parsed.error}</div>`;
+        return;
+      }
 
-      const m = mode.value;
+      const m = currentMode;
 
       try {
         if (m === "PRO") {
@@ -201,7 +220,7 @@ if (parsed.error) {
       }
     }
 
-    document.getElementById("btn").addEventListener("click", run);
+    // Enterでも検索
     input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") run(); });
   </script>
 </body>
