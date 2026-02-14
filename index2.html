@@ -28,6 +28,14 @@
     th{background:#fafafa; position:sticky; top:0;}
     .tag{display:inline-block; padding:2px 8px; border:1px solid #ddd; border-radius:999px; font-size:12px; margin-left:6px;}
     .right{text-align:right;}
+    .example{
+  width:100%;
+  max-width:720px;
+  display:block;
+  margin:10px 0 6px;
+  border:1px solid #ddd;
+  border-radius:12px;
+}
   </style>
 </head>
 
@@ -38,6 +46,7 @@
     緯度経度は、Googleマップで調べよう！例：<code>35.7100..., 139.8106...</code><br/>
     出力：各行に対して「最近接点（都道府県名）＋距離（km）＋判定」<br/>
   </p>
+  <img class="example" src="./excel_example.png" alt="入力例（施設名と緯度経度）" />
 
   <label for="batch">地名リスト（1行=1地点）</label>
   <textarea id="batch" placeholder="例:
