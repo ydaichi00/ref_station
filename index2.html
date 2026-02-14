@@ -34,18 +34,17 @@
 <body>
   <h1>エリア判定ツール（PRO / RES）- 一括判定</h1>
   <p class="help">
-    入力（複数行）：<code>地名, 緯度, 経度</code>（CSV/TSVどちらもOK）<br/>
+    入力（複数行）：<code>地名, 緯度, 経度</code> でも <code>地名 + 「緯度, 経度」</code>（2列）でもOK（CSV/TSVどちらもOK）<br/>
+    よくある：Excelの1列目に地名、2列目に <code>35.7100..., 139.8106...</code>（Googleマップ座標コピペ）<br/>
     出力：各行に対して「最近接点（都道府県名）＋距離（km）＋判定」<br/>
   </p>
 
-
-  
   <label for="batch">地名リスト（1行=1地点）</label>
-  <textarea id="batch" placeholder="例:
-伊勢神宮,34.456068392473696, 136.7253005120204
-札幌市時計台,43.062783806198304, 141.35344505294097
-大阪城,34.68701280998891, 135.52869107376975
-東京スカイツリー,35.71019334675773, 139.81068966804818
+  <textarea id="batch" placeholder="例（Excelからそのまま貼り付けOK）:
+伊勢神宮	34.456068392473696, 136.7253005120204
+札幌市時計台	43.062783806198304, 141.35344505294097
+大阪城	34.68701280998891, 135.52869107376975
+東京スカイツリー	35.71019334675773, 139.81068966804818
 "></textarea>
 
   <div class="rowline">
@@ -65,10 +64,10 @@
     </ul>
   </details>
 
-<p style="margin-top:10px;">
-  <a href="./index.html">← 個別判定（index.html）に戻る</a>
-</p>
-  
+  <p style="margin-top:10px;">
+    <a href="./index.html">← 個別判定（index.html）に戻る</a>
+  </p>
+
   <div id="out" class="card" style="display:none;"></div>
 
   <script>
@@ -118,7 +117,10 @@
     }
 
     // ===== Batch parse =====
-    // CSV/TSV両対応: 1行 = label,lat,lng（labelにカンマが入るケースは対象外＝運用で避ける）
+    // 対応：
+    //  1) 地名, 緯度, 経度（3列CSV/TSV）
+    //  2) 地名 + 「緯度, 経度」（2列TSV：Googleマップ座標を1セルにコピペ）
+    //  3) タブが無い場合でも、行末の数値2つを緯度経度として拾う（スペース/カンマ混在OK）
     function parseBatch(text) {
       const lines = String(text || "")
         .split(/\r?\n/)
@@ -130,29 +132,55 @@
       const rows = [];
       const errors = [];
 
+      // 数値抽出（指数表記も許容）
+      const numRe = /[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g;
+
       for (let i = 0; i < lines.length; i++) {
         const raw = lines[i];
 
-        // 区切り：タブ優先。無ければカンマ。
-        const parts = raw.includes("\t")
-          ? raw.split("\t").map(s => s.trim())
-          : raw.split(",").map(s => s.trim());
+        // Excel貼り付けは基本TSV（タブ区切り）
+        const tabParts = raw.split("\t").map(s => s.trim()).filter(Boolean);
 
-        if (parts.length < 3) {
-          errors.push(`${i+1}行目: 「地名, 緯度, 経度」の3列が必要です`);
-          continue;
+        let label = "";
+        let lat = null;
+        let lng = null;
+
+        if (tabParts.length >= 3) {
+          // 3列TSV：地名 / 緯度 / 経度
+          label = tabParts[0];
+          lat = Number(tabParts[1]);
+          lng = Number(tabParts[2]);
+        } else if (tabParts.length === 2) {
+          // 2列TSV：地名 / "緯度, 経度"
+          label = tabParts[0];
+          const nums = tabParts[1].match(numRe) || [];
+          if (nums.length >= 2) {
+            lat = Number(nums[0]);
+            lng = Number(nums[1]);
+          }
+        } else {
+          // タブ無し：CSVやスペース混在等 → 行末の数値2つを拾う
+          const nums = raw.match(numRe) || [];
+          if (nums.length >= 2) {
+            lat = Number(nums[nums.length - 2]);
+            lng = Number(nums[nums.length - 1]);
+
+            // 地名は末尾2数値を削った残り（雑にでOK）
+            let labelPart = raw;
+            labelPart = labelPart.replace(/[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?\s*$/, "");
+            labelPart = labelPart.replace(/[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?\s*$/, "");
+            labelPart = labelPart.replace(/[,\t\s　]+$/g, "").trim();
+            label = labelPart;
+          }
         }
 
-        const label = parts[0];
-        const lat = Number(parts[1]);
-        const lng = normalizeLng(Number(parts[2]));
+        if (!label) label = `（${i+1}行目）`;
 
-        if (!label) {
-          errors.push(`${i+1}行目: 地名が空です`);
-          continue;
-        }
+        lat = Number(lat);
+        lng = normalizeLng(Number(lng));
+
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-          errors.push(`${i+1}行目: 緯度経度は数値で入力してください`);
+          errors.push(`${i+1}行目: 緯度・経度の数値が見つかりません`);
           continue;
         }
         if (lat < -90 || lat > 90) {
@@ -214,7 +242,6 @@
     function km3(m){ return (m/1000); }
 
     function renderTable(mode, results) {
-      // results: [{label,lineNo, pro:{name,km,judge}?, res:{...}? , error?}]
       const hasPRO = (mode === "PRO" || mode === "BOTH");
       const hasRES = (mode === "RES" || mode === "BOTH");
 
@@ -275,7 +302,6 @@
 
       const esc = (v) => {
         const s = String(v ?? "");
-        // CSVエスケープ
         if (s.includes('"') || s.includes(",") || s.includes("\n") || s.includes("\t")) {
           return `"${s.replaceAll('"','""')}"`;
         }
@@ -333,7 +359,6 @@
       const rows = parsed.rows;
 
       try {
-        // 先に候補点JSONを読み込んでおく（高速化＋エラー早期検知）
         const preload = [];
         if (mode === "PRO" || mode === "BOTH") preload.push(loadPoints("PRO"));
         if (mode === "RES" || mode === "BOTH") preload.push(loadPoints("RES"));
