@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>最近傍点検索（PRO / RES）- 一括判定</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; max-width:980px; margin:24px auto; padding:0 16px;}
+    h1{font-size:22px; margin:0 0 10px;}
+    .help{color:#555; font-size:14px; margin:0 0 14px; line-height:1.6;}
+    label{display:block; margin:12px 0 6px; font-weight:700;}
+    textarea{width:100%; min-height:180px; padding:10px 12px; font-size:14px; border:1px solid #ccc; border-radius:10px; font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;}
+    input{width:100%; padding:10px 12px; font-size:16px; border:1px solid #ccc; border-radius:10px;}
+    .rowline{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px;}
+    button{padding:10px 14px; font-size:16px; border-radius:10px; cursor:pointer; border:1px solid #ccc; background:#fff;}
+    button:disabled{opacity:.6; cursor:not-allowed;}
+    button:active{transform:translateY(1px);}
+    .card{margin-top:16px; padding:12px; border:1px solid #ddd; border-radius:12px;}
+    .err{color:#b00020; font-weight:800;}
+    code{background:#f6f8fa; padding:2px 6px; border-radius:6px;}
+    details{border:1px dashed #ccc; border-radius:12px; padding:10px 12px; margin-top:14px;}
+    summary{cursor:pointer; font-weight:700;}
+    ul{margin:8px 0 0 18px;}
+    .muted{color:#666; font-size:13px;}
+    .hr{height:1px; background:#eee; margin:10px 0;}
+    table{width:100%; border-collapse:collapse; margin-top:10px;}
+    th, td{border-bottom:1px solid #eee; padding:8px 6px; text-align:left; vertical-align:top; font-size:14px;}
+    th{background:#fafafa; position:sticky; top:0;}
+    .tag{display:inline-block; padding:2px 8px; border:1px solid #ddd; border-radius:999px; font-size:12px; margin-left:6px;}
+    .right{text-align:right;}
+  </style>
+</head>
+
+<body>
+  <h1>最近傍点検索（PRO / RES）- 一括判定</h1>
+  <p class="help">
+    入力（複数行）：<code>地名, 緯度, 経度</code>（CSV/TSVどちらもOK）<br/>
+    出力：各行に対して「最近接点（都道府県名）＋距離（km）＋判定」<br/>
+    ※参照点座標は出力しません（機密配慮）
+  </p>
+
+  <label for="batch">地名リスト（1行=1地点）</label>
+  <textarea id="batch" placeholder="例:
+キングフィールズGC,35.42181707,139.6254556
+日高CC	36.16217321	139.4749356
+"></textarea>
+
+  <div class="rowline">
+    <label style="margin:0; font-weight:700;">検索</label>
+    <button id="btnPRO" type="button">PROで一括判定</button>
+    <button id="btnRES" type="button">RESで一括判定</button>
+    <button id="btnBOTH" type="button">両方で一括判定</button>
+    <button id="btnCopy" type="button" disabled>結果CSVをコピー</button>
+    <span class="muted">（ボタン押下で開始）</span>
+  </div>
+
+  <details>
+    <summary>判定基準（注意書き）</summary>
+    <ul>
+      <li><b>PRO</b>：◎（30km未満）／〇（30km以上、40km未満）／要現地調査（40km以上、50km未満）／非推奨（50km以上）</li>
+      <li><b>RES</b>：◎（40km未満）／〇（40km以上、50km未満）／要現地調査（50km以上、60km未満）／非推奨（60km以上）</li>
+    </ul>
+  </details>
+
+  <div id="out" class="card" style="display:none;"></div>
+
+  <script>
+    // =========================
+    // PRO/RES 設定
+    // =========================
+    const CONFIG = {
+      PRO: {
+        pointsFile: "./PROpoints.json",
+        judge: (km) => {
+          if (km < 30) return "◎（30km未満）";
+          if (km < 40) return "〇（30km以上、40km未満）";
+          if (km < 50) return "要現地調査（40km以上、50km未満）";
+          return "非推奨（50km以上）";
+        }
+      },
+      RES: {
+        pointsFile: "./RESpoints.json",
+        judge: (km) => {
+          if (km < 40) return "◎（40km未満）";
+          if (km < 50) return "〇（40km以上、50km未満）";
+          if (km < 60) return "要現地調査（50km以上、60km未満）";
+          return "非推奨（60km以上）";
+        }
+      }
+    };
+
+    // ===== Core geo =====
+    const R = 6371000; // meters
+    const toRad = (deg) => deg * Math.PI / 180;
+
+    function haversineMeters(lat1, lng1, lat2, lng2) {
+      const φ1 = toRad(lat1), φ2 = toRad(lat2);
+      const dφ = toRad(lat2 - lat1);
+      const dλ = toRad(lng2 - lng1);
+      const a = Math.sin(dφ/2)**2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(dλ/2)**2;
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+
+    function normalizeLng(lng){
+      // -180..180 に寄せる（入力が 190 とか来た時の保険）
+      let x = lng;
+      while (x > 180) x -= 360;
+      while (x < -180) x += 360;
+      return x;
+    }
+
+    // ===== Batch parse =====
+    // CSV/TSV両対応: 1行 = label,lat,lng（labelにカンマが入るケースは対象外＝運用で避ける）
+    function parseBatch(text) {
+      const lines = String(text || "")
+        .split(/\r?\n/)
+        .map(l => l.trim())
+        .filter(Boolean);
+
+      if (lines.length === 0) return { rows: [], errors: ["入力が空です"] };
+
+      const rows = [];
+      const errors = [];
+
+      for (let i = 0; i < lines.length; i++) {
+        const raw = lines[i];
+
+        // 区切り：タブ優先。無ければカンマ。
+        const parts = raw.includes("\t")
+          ? raw.split("\t").map(s => s.trim())
+          : raw.split(",").map(s => s.trim());
+
+        if (parts.length < 3) {
+          errors.push(`${i+1}行目: 「地名, 緯度, 経度」の3列が必要です`);
+          continue;
+        }
+
+        const label = parts[0];
+        const lat = Number(parts[1]);
+        const lng = normalizeLng(Number(parts[2]));
+
+        if (!label) {
+          errors.push(`${i+1}行目: 地名が空です`);
+          continue;
+        }
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          errors.push(`${i+1}行目: 緯度経度は数値で入力してください`);
+          continue;
+        }
+        if (lat < -90 || lat > 90) {
+          errors.push(`${i+1}行目: 緯度は -90〜90 です`);
+          continue;
+        }
+        if (lng < -180 || lng > 180) {
+          errors.push(`${i+1}行目: 経度は -180〜180 です`);
+          continue;
+        }
+
+        rows.push({ label, lat, lng, lineNo: i+1 });
+      }
+
+      return { rows, errors };
+    }
+
+    // ===== Data loading (cached) =====
+    const pointsCache = { PRO: null, RES: null };
+
+    async function loadPoints(which) {
+      if (pointsCache[which]) return pointsCache[which];
+
+      const res = await fetch(CONFIG[which].pointsFile, { cache: "no-store" });
+      if (!res.ok) throw new Error(`${which}: 候補点ファイルが読み込めませんでした`);
+      const pts = await res.json();
+      if (!Array.isArray(pts) || pts.length === 0) throw new Error(`${which}: 候補点が空です`);
+      pointsCache[which] = pts;
+      return pts;
+    }
+
+    async function findNearest(which, lat, lng) {
+      const points = await loadPoints(which);
+
+      let best = null;
+      for (const p of points) {
+        if (typeof p.lat !== "number" || typeof p.lng !== "number") continue;
+        const d = haversineMeters(lat, lng, p.lat, p.lng);
+        if (!best || d < best.distance_m) best = { point: p, distance_m: d };
+      }
+      if (!best) throw new Error(`${which}: 有効な候補点がありません`);
+      return best;
+    }
+
+    function displayName(point) {
+      return point.name ?? point.pref ?? point.id ?? "(no name)";
+    }
+
+    // ===== Render =====
+    function escapeHtml(s){
+      return String(s)
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#39;");
+    }
+
+    function km3(m){ return (m/1000); }
+
+    function renderTable(mode, results) {
+      // results: [{label,lineNo, pro:{name,km,judge}?, res:{...}? , error?}]
+      const hasPRO = (mode === "PRO" || mode === "BOTH");
+      const hasRES = (mode === "RES" || mode === "BOTH");
+
+      const headCols = [
+        `<th class="right">#</th>`,
+        `<th>地名</th>`,
+        ...(hasPRO ? [`<th>PRO 最近接点</th>`,`<th class="right">PRO 距離(km)</th>`,`<th>PRO 判定</th>`] : []),
+        ...(hasRES ? [`<th>RES 最近接点</th>`,`<th class="right">RES 距離(km)</th>`,`<th>RES 判定</th>`] : []),
+        `<th>備考</th>`
+      ].join("");
+
+      const body = results.map(r => {
+        const err = r.error ? `<span class="err">${escapeHtml(r.error)}</span>` : "";
+        const pro = r.pro || null;
+        const res = r.res || null;
+
+        const cols = [
+          `<td class="right">${r.lineNo}</td>`,
+          `<td>${escapeHtml(r.label)}</td>`,
+          ...(hasPRO ? [
+            `<td>${pro ? escapeHtml(pro.name) : ""}</td>`,
+            `<td class="right">${pro ? pro.km.toFixed(3) : ""}</td>`,
+            `<td>${pro ? escapeHtml(pro.judge) : ""}</td>`
+          ] : []),
+          ...(hasRES ? [
+            `<td>${res ? escapeHtml(res.name) : ""}</td>`,
+            `<td class="right">${res ? res.km.toFixed(3) : ""}</td>`,
+            `<td>${res ? escapeHtml(res.judge) : ""}</td>`
+          ] : []),
+          `<td>${err}</td>`
+        ];
+
+        return `<tr>${cols.join("")}</tr>`;
+      }).join("");
+
+      return `
+        <div>
+          <div class="muted">件数: ${results.length}件</div>
+          <table>
+            <thead><tr>${headCols}</tr></thead>
+            <tbody>${body}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    // ===== CSV export =====
+    function toCSV(mode, results) {
+      const hasPRO = (mode === "PRO" || mode === "BOTH");
+      const hasRES = (mode === "RES" || mode === "BOTH");
+
+      const header = [
+        "lineNo","label",
+        ...(hasPRO ? ["PRO_nearest","PRO_km","PRO_judge"] : []),
+        ...(hasRES ? ["RES_nearest","RES_km","RES_judge"] : []),
+        "error"
+      ];
+
+      const esc = (v) => {
+        const s = String(v ?? "");
+        // CSVエスケープ
+        if (s.includes('"') || s.includes(",") || s.includes("\n") || s.includes("\t")) {
+          return `"${s.replaceAll('"','""')}"`;
+        }
+        return s;
+      };
+
+      const rows = results.map(r => {
+        const pro = r.pro || {};
+        const res = r.res || {};
+        const arr = [
+          r.lineNo, r.label,
+          ...(hasPRO ? [pro.name ?? "", (pro.km!=null ? pro.km.toFixed(3) : ""), pro.judge ?? ""] : []),
+          ...(hasRES ? [res.name ?? "", (res.km!=null ? res.km.toFixed(3) : ""), res.judge ?? ""] : []),
+          r.error ?? ""
+        ];
+        return arr.map(esc).join(",");
+      });
+
+      return [header.join(","), ...rows].join("\n");
+    }
+
+    // ===== UI =====
+    const out = document.getElementById("out");
+    const batch = document.getElementById("batch");
+    const btnPRO = document.getElementById("btnPRO");
+    const btnRES = document.getElementById("btnRES");
+    const btnBOTH = document.getElementById("btnBOTH");
+    const btnCopy = document.getElementById("btnCopy");
+
+    let lastCSV = "";
+    let lastMode = "BOTH";
+
+    function setBusy(isBusy) {
+      btnPRO.disabled = isBusy;
+      btnRES.disabled = isBusy;
+      btnBOTH.disabled = isBusy;
+      btnCopy.disabled = isBusy || !lastCSV;
+    }
+
+    async function run(mode) {
+      out.style.display = "block";
+      out.innerHTML = "計算中…";
+      setBusy(true);
+      lastCSV = "";
+      lastMode = mode;
+      btnCopy.disabled = true;
+
+      const parsed = parseBatch(batch.value);
+      if (parsed.errors.length) {
+        out.innerHTML = `<div class="err">入力エラー:</div><ul>${parsed.errors.map(e => `<li class="err">${escapeHtml(e)}</li>`).join("")}</ul>`;
+        setBusy(false);
+        return;
+      }
+
+      const rows = parsed.rows;
+
+      try {
+        // 先に候補点JSONを読み込んでおく（高速化＋エラー早期検知）
+        const preload = [];
+        if (mode === "PRO" || mode === "BOTH") preload.push(loadPoints("PRO"));
+        if (mode === "RES" || mode === "BOTH") preload.push(loadPoints("RES"));
+        await Promise.all(preload);
+
+        const results = [];
+        for (const row of rows) {
+          const r = { lineNo: row.lineNo, label: row.label, pro: null, res: null, error: "" };
+
+          try {
+            if (mode === "PRO") {
+              const p = await findNearest("PRO", row.lat, row.lng);
+              const km = km3(p.distance_m);
+              r.pro = { name: displayName(p.point), km, judge: CONFIG.PRO.judge(km) };
+            } else if (mode === "RES") {
+              const x = await findNearest("RES", row.lat, row.lng);
+              const km = km3(x.distance_m);
+              r.res = { name: displayName(x.point), km, judge: CONFIG.RES.judge(km) };
+            } else { // BOTH
+              const [p, x] = await Promise.all([
+                findNearest("PRO", row.lat, row.lng),
+                findNearest("RES", row.lat, row.lng),
+              ]);
+              const kmP = km3(p.distance_m);
+              const kmR = km3(x.distance_m);
+              r.pro = { name: displayName(p.point), km: kmP, judge: CONFIG.PRO.judge(kmP) };
+              r.res = { name: displayName(x.point), km: kmR, judge: CONFIG.RES.judge(kmR) };
+            }
+          } catch (e) {
+            r.error = e?.message ? String(e.message) : "不明なエラー";
+          }
+
+          results.push(r);
+        }
+
+        out.innerHTML = renderTable(mode, results);
+
+        lastCSV = toCSV(mode, results);
+        btnCopy.disabled = false;
+      } catch (e) {
+        out.innerHTML = `<div class="err">${escapeHtml(e.message ?? String(e))}</div>`;
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    btnPRO.addEventListener("click", () => run("PRO"));
+    btnRES.addEventListener("click", () => run("RES"));
+    btnBOTH.addEventListener("click", () => run("BOTH"));
+
+    btnCopy.addEventListener("click", async () => {
+      if (!lastCSV) return;
+      try {
+        await navigator.clipboard.writeText(lastCSV);
+        btnCopy.textContent = "コピーしました";
+        setTimeout(() => { btnCopy.textContent = "結果CSVをコピー"; }, 1200);
+      } catch (e) {
+        alert("クリップボードにコピーできませんでした（ブラウザ権限の可能性）");
+      }
+    });
+  </script>
+</body>
+</html>
