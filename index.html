@@ -44,14 +44,13 @@
     <button id="btnRES" type="button">RESで検索</button>
     <button id="btnBOTH" type="button">両方で検索</button>
   </div>
-   <div class="card area-help">
-    <h3>判定基準ガイド</h3>
-    <div class="legend">
-      <div><b>PRO:</b> ◎ <30km | 〇 <40km | ▲ <50km</div>
-      <div style="width:1px; background:#ddd; height:16px;"></div>
-      <div><b>RES:</b> ◎ <40km | 〇 <50km | ▲ <60km</div>
-    </div>
-  </div>
+  <details>
+    <summary>判定基準</summary>
+    <ul>
+      <li><b>PRO</b>：◎（30km未満）／〇（30km以上、40km未満）／要現地調査（40km以上、50km未満）／非推奨（50km以上）</li>
+      <li><b>RES</b>：◎（40km未満）／〇（40km以上、50km未満）／要現地調査（50km以上、60km未満）／非推奨（60km以上）</li>
+    </ul>
+  </details>
 
 <p class="help">
   <a href="./index2.html">Excel等で作ったリストを一括で判定したい場合は、こちら</a>
